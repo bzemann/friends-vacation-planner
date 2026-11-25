@@ -67,7 +67,7 @@ Supabase
 - Max executors: 3
 - Git flow: pr
 - GitHub: public
-- Remote: none
+- Remote: https://github.com/bzemann/friends-vacation-planner
 
 ## Current status
 - Project setup done: Git, `.gitignore`, `scripts/check.sh`, `.claude/settings.json`, this file.
