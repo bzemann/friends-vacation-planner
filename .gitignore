@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# Build / caches
+*.tsbuildinfo
+.eslintcache
+coverage/
+
+# Playwright
+playwright-report/
+test-results/
+
+# Supabase
+supabase/.temp/
+supabase/.branches/
+supabase/functions/.env
+
+# Secrets (never commit)
+.env
+.env.*
+!.env.example
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+npm-debug.log*
+*.log
