@@ -49,6 +49,12 @@ Supabase
   - The Anthropic key lives only as a Supabase function secret, from a dedicated Anthropic Console workspace with a spend limit.
   - Local values go in `.env` and `supabase/functions/.env` (both gitignored); `.env.example` documents the variables.
   - The browser only ever sees the Supabase URL and anon key.
+- **Anthropic API key policy (binding, decided by Basil 2026-11-25):**
+  - The app uses **only** an API key from a **dedicated Anthropic Console workspace** for this project, with a monthly spend limit of about CHF 25. It never uses Basil's personal claude.ai account, his Claude Code login, or any other key or workspace.
+  - Basil creates the key himself and sets it himself in the terminal with `npx supabase secrets set ANTHROPIC_API_KEY=...`. For local development he puts it in the gitignored `supabase/functions/.env`. No agent ever asks for the key, sees it, prints it, logs it or writes it into a file, a commit, a PR or a GitHub secret.
+  - Code reads the key only in the Edge Function, explicitly via `Deno.env.get("ANTHROPIC_API_KEY")`. There is no fallback to any other key or variable. If the key is missing, the function fails closed: it returns a clear error, or runs in mock mode if mock mode is configured, and never calls Claude.
+  - Every task that touches the agent must be checked against this policy by the Reviewer.
+  - The setup steps are in `docs/DEPLOYMENT.md` (task 3). The key is needed from task 14 onwards; until then everything runs on mock providers.
 - **Data sources:** provisional; the decision is made in roadmap task 13.
   - Amadeus Self-Service shut down in July 2026. Flight candidates are Duffel, Travelpayouts and RapidAPI.
   - Trains: Claude web search plus deep links to SBB, DB and Trainline.
@@ -79,7 +85,7 @@ Supabase
 **M1: Scaffolding, deployment, auth, groups**
 - [ ] 1. Scaffold Next.js (App Router, TypeScript, Tailwind, static export, basePath through env), ESLint/Prettier/Vitest, `.env.example`, npm scripts. Confirm how `lib/` code is shared with the Deno functions.
 - [ ] 2. CI (`ci.yml`) and GitHub Pages deployment (`deploy.yml`); enable Pages through `gh`; first live deployment of a placeholder page.
-- [ ] 3. Supabase setup: CLI as devDependency, `supabase init`, base schema (profiles, trips, trip_members, invites, allowlist) with RLS, `docs/DEPLOYMENT.md` including the manual checklist (Supabase project, secrets, Console workspace with spend limit).
+- [ ] 3. Supabase setup: CLI as devDependency, `supabase init`, base schema (profiles, trips, trip_members, invites, allowlist) with RLS, `docs/DEPLOYMENT.md` including the manual checklist (Supabase project, secrets, and a step-by-step guide for the dedicated Anthropic Console workspace, its spend limit and key, following the API key policy).
 - [ ] 4. Magic-link auth with an invite-only allowlist (signup checks the allowlist or a valid invite) and a login page.
 - [ ] 5. Create trips, generate an invite link, join through `/join?token=…`, list my trips.
 
@@ -117,3 +123,4 @@ Supabase
   - Created: Git repo, `.gitignore`, `scripts/check.sh`, `.claude/settings.json`, `CLAUDE.md`.
   - Roadmap approved.
   - Decisions: public repo, `pr` flow, at most 3 executors, magic link, invite-only, API budget about CHF 25 per month.
+- 2026-11-25: Added the binding Anthropic API key policy (dedicated Console workspace key only; set by Basil himself; fail closed).
