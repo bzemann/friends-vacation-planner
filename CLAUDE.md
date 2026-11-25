@@ -50,8 +50,15 @@ Supabase
   - Local values go in `.env` and `supabase/functions/.env` (both gitignored); `.env.example` documents the variables.
   - The browser only ever sees the Supabase URL and anon key.
 - **Anthropic API key policy (binding, decided by Basil 2026-11-25):**
-  - The app uses **only** an API key from a **dedicated Anthropic Console workspace** for this project, with a monthly spend limit of about CHF 25. It never uses Basil's personal claude.ai account, his Claude Code login, or any other key or workspace.
-  - Basil creates the key himself and sets it himself in the terminal with `npx supabase secrets set ANTHROPIC_API_KEY=...`. For local development he puts it in the gitignored `supabase/functions/.env`. No agent ever asks for the key, sees it, prints it, logs it or writes it into a file, a commit, a PR or a GitHub secret.
+  - The app uses **only** API keys from **two dedicated Anthropic Console workspaces** for this project. It never uses Basil's personal claude.ai account, his Claude Code login, or any other key or workspace.
+
+    | Workspace | Key | Spend limit | Where the key lives |
+    |---|---|---|---|
+    | `friends-vacation-planner` | `vacation-planner-prod` | about CHF 25 per month | only as a Supabase function secret (live website) |
+    | `friends-vacation-planner-dev` | `vacation-planner-dev` | about CHF 5 per month | only in the gitignored `supabase/functions/.env` (local development) |
+
+  - The separate workspaces mean local testing can never use up the live budget, and either key can be revoked without affecting the other. The prod key is never used locally, and the dev key is never set in Supabase.
+  - Basil creates both keys himself and sets them himself: prod in the terminal with `npx supabase secrets set ANTHROPIC_API_KEY=...`, dev by editing `supabase/functions/.env`. No agent ever asks for a key, sees it, prints it, logs it or writes it into a file, a commit, a PR or a GitHub secret.
   - Code reads the key only in the Edge Function, explicitly via `Deno.env.get("ANTHROPIC_API_KEY")`. There is no fallback to any other key or variable. If the key is missing, the function fails closed: it returns a clear error, or runs in mock mode if mock mode is configured, and never calls Claude.
   - Every task that touches the agent must be checked against this policy by the Reviewer.
   - The setup steps are in `docs/DEPLOYMENT.md` (task 3). The key is needed from task 14 onwards; until then everything runs on mock providers.
@@ -85,7 +92,7 @@ Supabase
 **M1: Scaffolding, deployment, auth, groups**
 - [ ] 1. Scaffold Next.js (App Router, TypeScript, Tailwind, static export, basePath through env), ESLint/Prettier/Vitest, `.env.example`, npm scripts. Confirm how `lib/` code is shared with the Deno functions.
 - [ ] 2. CI (`ci.yml`) and GitHub Pages deployment (`deploy.yml`); enable Pages through `gh`; first live deployment of a placeholder page.
-- [ ] 3. Supabase setup: CLI as devDependency, `supabase init`, base schema (profiles, trips, trip_members, invites, allowlist) with RLS, `docs/DEPLOYMENT.md` including the manual checklist (Supabase project, secrets, and a step-by-step guide for the dedicated Anthropic Console workspace, its spend limit and key, following the API key policy).
+- [ ] 3. Supabase setup: CLI as devDependency, `supabase init`, base schema (profiles, trips, trip_members, invites, allowlist) with RLS, `docs/DEPLOYMENT.md` including the manual checklist (Supabase project, secrets, and a step-by-step guide for the two Anthropic Console workspaces (prod and dev), their spend limits and keys, following the API key policy). The Planner then walks Basil through it live; verify with `npx supabase secrets list`, which shows names only.
 - [ ] 4. Magic-link auth with an invite-only allowlist (signup checks the allowlist or a valid invite) and a login page.
 - [ ] 5. Create trips, generate an invite link, join through `/join?token=…`, list my trips.
 
@@ -124,3 +131,4 @@ Supabase
   - Roadmap approved.
   - Decisions: public repo, `pr` flow, at most 3 executors, magic link, invite-only, API budget about CHF 25 per month.
 - 2026-11-25: Added the binding Anthropic API key policy (dedicated Console workspace key only; set by Basil himself; fail closed).
+- 2026-11-25: API key policy split into prod and dev: two workspaces, two keys, separate spend limits.
