@@ -103,6 +103,7 @@ Supabase
 - Open: tasks 3 to 18. Next is task 3 (Supabase setup, `docs/DEPLOYMENT.md`, Anthropic workspaces walkthrough).
 - Known issues:
   - The local Node is 25, which is not an LTS release; Vitest 5 shows an EBADENGINE warning during install, but everything works. CI uses Node 24 from `.nvmrc`; running `nvm use` locally is optional.
+  - The local npm 11.6.2 writes incomplete lockfiles: it leaves out nested optional wasm dependencies (`@emnapi/*`), and then `npm ci` on CI (npm 11.19.1) fails. After any dependency change, regenerate with `npx -y npm@11.19.1 install --package-lock-only --ignore-scripts`, or upgrade the global npm. The automatic permission check blocks this command for subagents, so Basil runs it himself with `!`.
   - Versions held back on purpose: TypeScript `~6.0.3` (typescript-eslint supports only versions below 6.1, so not TypeScript 7) and ESLint 9 (what `create-next-app` installs; it works with `eslint-config-next` 16).
 
 ## Roadmap
@@ -163,3 +164,4 @@ Supabase
   - Added `ci.yml` (job `ci`) and `deploy.yml` (build, then deploy), and `.nvmrc` = 24.
   - Pages enabled with "GitHub Actions" as the source; branch protection on `main`.
   - Reviewer finding fixed: Pages and OIDC permissions are now on the deploy job only.
+  - `package-lock.json` regenerated with npm 11.19.1, because the first CI run failed on missing `@emnapi/*` entries. No versions changed.
