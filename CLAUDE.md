@@ -29,14 +29,21 @@ Supabase
 - **`app/`**: Next.js App Router, TypeScript, Tailwind, built as a static export (`output: "export"`) and served by GitHub Pages.
   - No server features.
   - Dynamic pages use query parameters, for example `/trip?id=…` and `/destination?trip=…&result=…`.
-  - `basePath` and `assetPrefix` come from an environment variable (`/friends-vacation-planner` on Pages).
+  - `basePath` and `assetPrefix` come from `NEXT_PUBLIC_BASE_PATH` (`/friends-vacation-planner` on Pages, empty locally), cleaned up by `normalizeBasePath` in `lib/config/base-path.ts`.
+  - `next.config.ts` also sets `trailingSlash: true` (`/trip` → `trip/index.html`, which Pages finds reliably) and `images.unoptimized: true` (no image server).
+  - Tailwind v4 is compiled through the `@tailwindcss/turbopack` loader in `next.config.ts`; there is no `postcss.config.mjs`. Next 16 builds with Turbopack by default, so a `next build --webpack` would not process Tailwind.
+  - `agentRules: false` in `next.config.ts` stops `next dev` from generating an `AGENTS.md`; `CLAUDE.md` is the only agent instructions file (approved by Basil).
 - **`lib/availability/`**: the overlap engine as pure functions.
   - It intersects date ranges, applies min/max days and minimum participants, and ranks windows by length and number of participants.
   - It is fully tested with Vitest.
 - **`lib/agent/`**: zod schemas and types for the agent output (the single source of truth).
   - Every price has `estimate: true`, `retrievedAt` and `sourceUrls`.
 - **`lib/providers/`**: Travel, Stay, Places and Weather interfaces, with mock implementations first.
-- **Rule for shared code:** `lib/availability` and `lib/agent` are also imported by the Deno Edge Functions, so they must stay free of Node APIs.
+- **Rules for shared code:** `lib/availability` and `lib/agent` are also imported by the Deno Edge Functions, through relative imports. Deployment uses `supabase functions deploy --use-api`, which supports files outside `supabase/`.
+  1. No Node built-ins, no React or Next, and no dynamic `import()`. ESLint enforces this: `no-restricted-imports` builds its list from Node's `builtinModules`, and `no-restricted-syntax` forbids dynamic imports.
+  2. Relative imports inside these folders include the `.ts` extension (Deno requires it; `tsconfig.json` has `allowImportingTsExtensions`).
+  3. The only external package is `zod`, mapped to `npm:zod` in `supabase/functions/deno.json` (task 3).
+  - Still to verify in task 3: whether local `supabase functions serve` (Docker) can see `lib/`. If not, the fallback is to move the shared code to `supabase/functions/_shared/` and import it in Next through a path alias.
 - **`supabase/migrations/`**: schema plus RLS. Members can only access trips they belong to.
 - **`supabase/functions/destination-agent/`**: the only place that calls the Anthropic API. It runs in this order:
   1. Checks the JWT and trip membership.
@@ -84,13 +91,15 @@ Supabase
 
 ## Current status
 - Project setup done: Git, `.gitignore`, `scripts/check.sh`, `.claude/settings.json`, this file.
-- No application code yet.
-- Open: the whole roadmap. Next is task 1.
-- Known issues: none.
+- Task 1 done: Next.js 16 static export scaffold with a placeholder page, ESLint 9, Prettier, Vitest 5, the base path helper with tests, and `.env.example`.
+- Open: tasks 2 to 18. Next is task 2 (CI and GitHub Pages deployment).
+- Known issues:
+  - The local Node is 25, which is not an LTS release; Vitest 5 shows an EBADENGINE warning during install, but everything works. Plan for task 2: pin Node 24 LTS in CI and add `.nvmrc`.
+  - Versions held back on purpose: TypeScript `~6.0.3` (typescript-eslint supports only versions below 6.1, so not TypeScript 7) and ESLint 9 (what `create-next-app` installs; it works with `eslint-config-next` 16).
 
 ## Roadmap
 **M1: Scaffolding, deployment, auth, groups**
-- [ ] 1. Scaffold Next.js (App Router, TypeScript, Tailwind, static export, basePath through env), ESLint/Prettier/Vitest, `.env.example`, npm scripts. Confirm how `lib/` code is shared with the Deno functions.
+- [x] 1. Scaffold Next.js (App Router, TypeScript, Tailwind, static export, basePath through env), ESLint/Prettier/Vitest, `.env.example`, npm scripts. Confirm how `lib/` code is shared with the Deno functions.
 - [ ] 2. CI (`ci.yml`) and GitHub Pages deployment (`deploy.yml`); enable Pages through `gh`; first live deployment of a placeholder page.
 - [ ] 3. Supabase setup: CLI as devDependency, `supabase init`, base schema (profiles, trips, trip_members, invites, allowlist) with RLS, `docs/DEPLOYMENT.md` including the manual checklist (Supabase project, secrets, and a step-by-step guide for the two Anthropic Console workspaces (prod and dev), their spend limits and keys, following the API key policy). The Planner then walks Basil through it live; verify with `npx supabase secrets list`, which shows names only.
 - [ ] 4. Magic-link auth with an invite-only allowlist (signup checks the allowlist or a valid invite) and a login page.
@@ -123,7 +132,12 @@ Supabase
 - Requirements: Node (25 is installed), npm, and Docker (needed for local Supabase).
 - Package manager: npm. The Supabase CLI is a devDependency, run with `npx supabase` (from task 3).
 - Fast checks: `./scripts/check.sh`
-- Build, test and dev commands will be added in task 1 (`npm run dev`, `npm run build`, `npm test`, `npm run lint`, `npm run typecheck`).
+- First time: `npm install`. Copy `.env.example` to `.env` if you need to set values locally.
+- `npm run dev`: development server at http://localhost:3000.
+- `npm run build`: static export into `out/`. Use `NEXT_PUBLIC_BASE_PATH=/friends-vacation-planner npm run build` to build exactly as on GitHub Pages.
+- `npm test` runs Vitest once (`lib/**/*.test.ts`); `npm run test:watch` keeps it running.
+- `npm run lint`, `npm run typecheck`, `npm run format:check`, `npm run format`.
+- `npm run check` runs the same fast checks as the hook.
 
 ## Changelog
 - 2026-11-25: Project setup.
@@ -132,3 +146,7 @@ Supabase
   - Decisions: public repo, `pr` flow, at most 3 executors, magic link, invite-only, API budget about CHF 25 per month.
 - 2026-11-25: Added the binding Anthropic API key policy (dedicated Console workspace key only; set by Basil himself; fail closed).
 - 2026-11-25: API key policy split into prod and dev: two workspaces, two keys, separate spend limits.
+- 2026-11-25: Task 1, Next.js scaffold.
+  - Static export with base path from env (`normalizeBasePath`, 10 tests), Tailwind v4 through Turbopack, `agentRules: false`.
+  - ESLint 9 with the shared-code import rules, Prettier (Markdown and `.claude/` ignored), Vitest 5, npm scripts, `.env.example`.
+  - Reviewer findings fixed: complete Node built-in list, dynamic imports blocked, `vitest.config.mts`, repeated leading slashes collapsed.
