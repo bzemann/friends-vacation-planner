@@ -51,7 +51,14 @@ Supabase
   3. Enforces daily limits per trip, per user and a global limit.
   4. Calls Claude with capped max_tokens and a capped number of web searches.
   5. Validates the output with zod and caches it.
-- **`.github/workflows/`**: `ci.yml` runs on PRs (lint, type check, tests). `deploy.yml` runs on pushes to `main` (static export, then GitHub Pages).
+- **`.github/workflows/`**: Node version from `.nvmrc` (24 LTS).
+  - `ci.yml` runs on PRs to `main` and manually. Its job, named `ci`, runs `npm ci`, lint, typecheck, format:check, test, and a build with the Pages base path. It has read-only permissions.
+  - `deploy.yml` runs on pushes to `main` and manually.
+    - Job `build`: `configure-pages` supplies `base_path`, which becomes `NEXT_PUBLIC_BASE_PATH`; then test, build, and upload `out/`. Read-only permissions.
+    - Job `deploy`: `deploy-pages`. Only this job has `pages: write` and `id-token: write`.
+    - Concurrency group `pages`: a running deploy is never cancelled.
+  - GitHub Pages source is "GitHub Actions". Live URL: https://bzemann.github.io/friends-vacation-planner/
+  - Branch protection on `main`: PR required, status check `ci` required, 0 approvals, enforced for admins, no force pushes or deletion. Raise approvals to 1 when the collaborator joins.
 - **Secrets:**
   - The Anthropic key lives only as a Supabase function secret, from a dedicated Anthropic Console workspace with a spend limit.
   - Local values go in `.env` and `supabase/functions/.env` (both gitignored); `.env.example` documents the variables.
@@ -92,15 +99,17 @@ Supabase
 ## Current status
 - Project setup done: Git, `.gitignore`, `scripts/check.sh`, `.claude/settings.json`, this file.
 - Task 1 done: Next.js 16 static export scaffold with a placeholder page, ESLint 9, Prettier, Vitest 5, the base path helper with tests, and `.env.example`.
-- Open: tasks 2 to 18. Next is task 2 (CI and GitHub Pages deployment).
+- Task 2 done: CI on PRs, automatic deployment to GitHub Pages on merge to `main`, Pages enabled, branch protection on `main`, Node 24 LTS pinned in `.nvmrc`.
+- Open: tasks 3 to 18. Next is task 3 (Supabase setup, `docs/DEPLOYMENT.md`, Anthropic workspaces walkthrough).
 - Known issues:
-  - The local Node is 25, which is not an LTS release; Vitest 5 shows an EBADENGINE warning during install, but everything works. Plan for task 2: pin Node 24 LTS in CI and add `.nvmrc`.
+  - The local Node is 25, which is not an LTS release; Vitest 5 shows an EBADENGINE warning during install, but everything works. CI uses Node 24 from `.nvmrc`; running `nvm use` locally is optional.
+  - The local npm 11.6.2 writes incomplete lockfiles: it leaves out nested optional wasm dependencies (`@emnapi/*`), and then `npm ci` on CI (npm 11.19.1) fails. After any dependency change, regenerate with `npx -y npm@11.19.1 install --package-lock-only --ignore-scripts`, or upgrade the global npm. The automatic permission check blocks this command for subagents, so Basil runs it himself with `!`.
   - Versions held back on purpose: TypeScript `~6.0.3` (typescript-eslint supports only versions below 6.1, so not TypeScript 7) and ESLint 9 (what `create-next-app` installs; it works with `eslint-config-next` 16).
 
 ## Roadmap
 **M1: Scaffolding, deployment, auth, groups**
 - [x] 1. Scaffold Next.js (App Router, TypeScript, Tailwind, static export, basePath through env), ESLint/Prettier/Vitest, `.env.example`, npm scripts. Confirm how `lib/` code is shared with the Deno functions.
-- [ ] 2. CI (`ci.yml`) and GitHub Pages deployment (`deploy.yml`); enable Pages through `gh`; first live deployment of a placeholder page.
+- [x] 2. CI (`ci.yml`) and GitHub Pages deployment (`deploy.yml`); enable Pages through `gh`; first live deployment of a placeholder page.
 - [ ] 3. Supabase setup: CLI as devDependency, `supabase init`, base schema (profiles, trips, trip_members, invites, allowlist) with RLS, `docs/DEPLOYMENT.md` including the manual checklist (Supabase project, secrets, and a step-by-step guide for the two Anthropic Console workspaces (prod and dev), their spend limits and keys, following the API key policy). The Planner then walks Basil through it live; verify with `npx supabase secrets list`, which shows names only.
 - [ ] 4. Magic-link auth with an invite-only allowlist (signup checks the allowlist or a valid invite) and a login page.
 - [ ] 5. Create trips, generate an invite link, join through `/join?token=…`, list my trips.
@@ -129,7 +138,8 @@ Supabase
 - [ ] 18. Playwright end-to-end tests of the main flow (mock mode) in CI.
 
 ## Setup and run
-- Requirements: Node (25 is installed), npm, and Docker (needed for local Supabase).
+- Requirements: Node 24 LTS (`.nvmrc`; Node 25 also works locally), npm, and Docker (needed for local Supabase).
+- Deployment: merging a PR into `main` publishes the site automatically. Watch it with `gh run watch`; a manual redeploy is `gh workflow run deploy.yml`.
 - Package manager: npm. The Supabase CLI is a devDependency, run with `npx supabase` (from task 3).
 - Fast checks: `./scripts/check.sh`
 - First time: `npm install`. Copy `.env.example` to `.env` if you need to set values locally.
@@ -150,3 +160,8 @@ Supabase
   - Static export with base path from env (`normalizeBasePath`, 10 tests), Tailwind v4 through Turbopack, `agentRules: false`.
   - ESLint 9 with the shared-code import rules, Prettier (Markdown and `.claude/` ignored), Vitest 5, npm scripts, `.env.example`.
   - Reviewer findings fixed: complete Node built-in list, dynamic imports blocked, `vitest.config.mts`, repeated leading slashes collapsed.
+- 2026-11-25: Task 2, CI and GitHub Pages deployment.
+  - Added `ci.yml` (job `ci`) and `deploy.yml` (build, then deploy), and `.nvmrc` = 24.
+  - Pages enabled with "GitHub Actions" as the source; branch protection on `main`.
+  - Reviewer finding fixed: Pages and OIDC permissions are now on the deploy job only.
+  - `package-lock.json` regenerated with npm 11.19.1, because the first CI run failed on missing `@emnapi/*` entries. No versions changed.
