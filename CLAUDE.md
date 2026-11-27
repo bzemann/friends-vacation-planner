@@ -16,7 +16,7 @@ Product decisions:
 ## Architecture and how it works
 ```
 Browser (static Next.js export on GitHub Pages)
-   │  only the public Supabase URL and anon key
+   │  only the public Supabase URL and publishable key
    ▼
 Supabase
    ├─ Auth (magic link, invite-only allowlist)
@@ -42,9 +42,19 @@ Supabase
 - **Rules for shared code:** `lib/availability` and `lib/agent` are also imported by the Deno Edge Functions, through relative imports. Deployment uses `supabase functions deploy --use-api`, which supports files outside `supabase/`.
   1. No Node built-ins, no React or Next, and no dynamic `import()`. ESLint enforces this: `no-restricted-imports` builds its list from Node's `builtinModules`, and `no-restricted-syntax` forbids dynamic imports.
   2. Relative imports inside these folders include the `.ts` extension (Deno requires it; `tsconfig.json` has `allowImportingTsExtensions`).
-  3. The only external package is `zod`, mapped to `npm:zod` in `supabase/functions/deno.json` (task 3).
-  - Still to verify in task 3: whether local `supabase functions serve` (Docker) can see `lib/`. If not, the fallback is to move the shared code to `supabase/functions/_shared/` and import it in Next through a path alias.
-- **`supabase/migrations/`**: schema plus RLS. Members can only access trips they belong to.
+  3. The only external package is `zod`, mapped to `npm:zod` in `supabase/functions/deno.json`. That file is created in task 9 or 10, with the first function that uses zod.
+  - **Verified in task 3:** a probe function under local `supabase functions serve` (Docker) imported `../../../lib/config/base-path.ts` and returned `{"ok":true}`, so `lib/` stays at the project root and no `_shared/` fallback is needed. Deployment with `--use-api` gets checked in task 10.
+- **`supabase/`** (CLI 3.x; the config file is `supabase/config.jsonc`): `migrations/` holds the schema plus RLS, `tests/database/` the pgTAP RLS tests (`npm run db:test`), and `seed.sql` the local test data (example.com addresses only).
+  - **Tables:**
+    - `allowlist`: no access for `anon`/`authenticated` at all; maintained in the dashboard SQL editor.
+    - `profiles`: created by a trigger on `auth.users`. Readable by yourself and by people who share a trip with you; only `display_name` is updatable, and only your own.
+    - `trips`: readable by members; only the owner may update the settings columns or delete.
+    - `trip_members`: readable by members of the same trip; a member may leave (not the owner), and the owner may remove others. Exactly one owner per trip (partial unique index).
+    - `invites`: owner only. Insert allows only `trip_id` and `expires_at` (token and `created_by` are filled in automatically), update only `revoked_at`. At most 30 days of validity, 14 days by default.
+  - **No direct inserts** into `trips` or `trip_members`. Creating a trip and joining one go through security definer RPCs in task 5.
+  - **Helpers** `private.is_trip_member`, `private.is_trip_owner` and `private.shares_trip_with` are security definer with `search_path ''`. They live in the non-exposed schema `private`, which avoids recursive RLS.
+  - **Closed by default:** the migration revokes default privileges. New tables and sequences in `public` get nothing for `anon`/`authenticated`, and new functions get no EXECUTE for PUBLIC, `anon` or `authenticated`, in any schema. **Every new table or RPC must grant explicitly.** An RLS test guards this.
+  - **Policies:** always written with `(select auth.uid())`. Every new table needs RLS, minimal grants and pgTAP tests in the same task.
 - **`supabase/functions/destination-agent/`**: the only place that calls the Anthropic API. It runs in this order:
   1. Checks the JWT and trip membership.
   2. Returns the cached result if one exists (cache key: trip + window).
@@ -62,7 +72,7 @@ Supabase
 - **Secrets:**
   - The Anthropic key lives only as a Supabase function secret, from a dedicated Anthropic Console workspace with a spend limit.
   - Local values go in `.env` and `supabase/functions/.env` (both gitignored); `.env.example` documents the variables.
-  - The browser only ever sees the Supabase URL and anon key.
+  - The browser only ever sees the Supabase URL and the publishable key (`sb_publishable_…`).
 - **Anthropic API key policy (binding, decided by Basil 2026-11-25):**
   - The app uses **only** API keys from **two dedicated Anthropic Console workspaces** for this project. It never uses Basil's personal claude.ai account, his Claude Code login, or any other key or workspace.
 
@@ -72,7 +82,7 @@ Supabase
     | `friends-vacation-planner-dev` | `vacation-planner-dev` | about CHF 5 per month | only in the gitignored `supabase/functions/.env` (local development) |
 
   - The separate workspaces mean local testing can never use up the live budget, and either key can be revoked without affecting the other. The prod key is never used locally, and the dev key is never set in Supabase.
-  - Basil creates both keys himself and sets them himself: prod in the terminal with `npx supabase secrets set ANTHROPIC_API_KEY=...`, dev by editing `supabase/functions/.env`. No agent ever asks for a key, sees it, prints it, logs it or writes it into a file, a commit, a PR or a GitHub secret.
+  - Basil creates both keys himself and sets them himself: prod in the Supabase dashboard (Edge Functions → Secrets), not with `supabase secrets set` in the terminal, because the shell history would store the key in plain text. Dev by editing `supabase/functions/.env`. Verification: `npx supabase secrets list`, which shows names and digests only. No agent ever asks for a key, sees it, prints it, logs it or writes it into a file, a commit, a PR or a GitHub secret.
   - Code reads the key only in the Edge Function, explicitly via `Deno.env.get("ANTHROPIC_API_KEY")`. There is no fallback to any other key or variable. If the key is missing, the function fails closed: it returns a clear error, or runs in mock mode if mock mode is configured, and never calls Claude.
   - Every task that touches the agent must be checked against this policy by the Reviewer.
   - The setup steps are in `docs/DEPLOYMENT.md` (task 3). The key is needed from task 14 onwards; until then everything runs on mock providers.
@@ -100,17 +110,19 @@ Supabase
 - Project setup done: Git, `.gitignore`, `scripts/check.sh`, `.claude/settings.json`, this file.
 - Task 1 done: Next.js 16 static export scaffold with a placeholder page, ESLint 9, Prettier, Vitest 5, the base path helper with tests, and `.env.example`.
 - Task 2 done: CI on PRs, automatic deployment to GitHub Pages on merge to `main`, Pages enabled, branch protection on `main`, Node 24 LTS pinned in `.nvmrc`.
-- Open: tasks 3 to 18. Next is task 3 (Supabase setup, `docs/DEPLOYMENT.md`, Anthropic workspaces walkthrough).
+- Task 3 done (code): Supabase CLI 3.4, base schema migration with RLS, 58 pgTAP RLS tests, seed, `docs/DEPLOYMENT.md`. The live setup with Basil follows after the merge: Supabase project (Zurich), `db push`, Anthropic workspaces and keys, GitHub variables.
+- Open: tasks 4 to 18. Next is task 4 (magic-link auth with an invite-only gate).
+- Note for task 4: sign-up is currently open in `supabase/config.jsonc` for both magic link and email+password. A stranger only gets an empty profile today, but task 4 must gate both routes (before-user-created hook against the allowlist or a valid invite) or turn off password sign-up.
 - Known issues:
   - The local Node is 25, which is not an LTS release; Vitest 5 shows an EBADENGINE warning during install, but everything works. CI uses Node 24 from `.nvmrc`; running `nvm use` locally is optional.
-  - The local npm 11.6.2 writes incomplete lockfiles: it leaves out nested optional wasm dependencies (`@emnapi/*`), and then `npm ci` on CI (npm 11.19.1) fails. After any dependency change, regenerate with `npx -y npm@11.19.1 install --package-lock-only --ignore-scripts`, or upgrade the global npm. The automatic permission check blocks this command for subagents, so Basil runs it himself with `!`.
+  - Lockfiles need npm 11.19 or newer. Older npm versions (such as 11.6.2) leave out nested optional wasm dependencies (`@emnapi/*`), and then `npm ci` on CI fails. Basil's global npm is now 11.21.3, so a plain `npm install` is fine. npm 12 does not support Node 25.
   - Versions held back on purpose: TypeScript `~6.0.3` (typescript-eslint supports only versions below 6.1, so not TypeScript 7) and ESLint 9 (what `create-next-app` installs; it works with `eslint-config-next` 16).
 
 ## Roadmap
 **M1: Scaffolding, deployment, auth, groups**
 - [x] 1. Scaffold Next.js (App Router, TypeScript, Tailwind, static export, basePath through env), ESLint/Prettier/Vitest, `.env.example`, npm scripts. Confirm how `lib/` code is shared with the Deno functions.
 - [x] 2. CI (`ci.yml`) and GitHub Pages deployment (`deploy.yml`); enable Pages through `gh`; first live deployment of a placeholder page.
-- [ ] 3. Supabase setup: CLI as devDependency, `supabase init`, base schema (profiles, trips, trip_members, invites, allowlist) with RLS, `docs/DEPLOYMENT.md` including the manual checklist (Supabase project, secrets, and a step-by-step guide for the two Anthropic Console workspaces (prod and dev), their spend limits and keys, following the API key policy). The Planner then walks Basil through it live; verify with `npx supabase secrets list`, which shows names only.
+- [x] 3. Supabase setup: CLI as devDependency, `supabase init`, base schema (profiles, trips, trip_members, invites, allowlist) with RLS, `docs/DEPLOYMENT.md` including the manual checklist (Supabase project, secrets, and a step-by-step guide for the two Anthropic Console workspaces (prod and dev), their spend limits and keys, following the API key policy). The Planner then walks Basil through it live; verify with `npx supabase secrets list`, which shows names only.
 - [ ] 4. Magic-link auth with an invite-only allowlist (signup checks the allowlist or a valid invite) and a login page.
 - [ ] 5. Create trips, generate an invite link, join through `/join?token=…`, list my trips.
 
@@ -142,6 +154,8 @@ Supabase
 - Deployment: merging a PR into `main` publishes the site automatically. Watch it with `gh run watch`; a manual redeploy is `gh workflow run deploy.yml`.
 - Package manager: npm. The Supabase CLI is a devDependency, run with `npx supabase` (from task 3).
 - Fast checks: `./scripts/check.sh`
+- Local Supabase (Docker Desktop must be running): `npm run db:start`, `npm run db:reset` (migrations + seed), `npm run db:test` (pgTAP RLS tests), `npm run db:stop`.
+- Remote setup, keys and the allowlist: see `docs/DEPLOYMENT.md`. Migrations are pushed by hand with `npx supabase db push` after a merge.
 - First time: `npm install`. Copy `.env.example` to `.env` if you need to set values locally.
 - `npm run dev`: development server at http://localhost:3000.
 - `npm run build`: static export into `out/`. Use `NEXT_PUBLIC_BASE_PATH=/friends-vacation-planner npm run build` to build exactly as on GitHub Pages.
@@ -165,3 +179,9 @@ Supabase
   - Pages enabled with "GitHub Actions" as the source; branch protection on `main`.
   - Reviewer finding fixed: Pages and OIDC permissions are now on the deploy job only.
   - `package-lock.json` regenerated with npm 11.19.1, because the first CI run failed on missing `@emnapi/*` entries. No versions changed.
+- 2026-11-27: Task 3, Supabase setup.
+  - Supabase CLI 3.4 (`config.jsonc`); base schema migration (allowlist, profiles, trips, trip_members, invites) with RLS, minimal grants, `private` helpers and closed-by-default privileges.
+  - 58 pgTAP RLS tests, seed with example.com addresses only, `docs/DEPLOYMENT.md`, `.env.example` switched to the publishable key, `supabase/functions/.env.example`.
+  - Probe confirmed that local `functions serve` can import `lib/`.
+  - Two review rounds. Fixed: docs errors; about 28 more RLS tests; 30-day invite cap; one owner per trip; global function default privilege (new functions were callable by `anon`); a test that could never fail.
+  - API key policy now says the prod key is set in the dashboard.
